@@ -1,0 +1,162 @@
+import json, csv, os, requests, requests.auth, tzlocal, math, plotly
+from decimal import Decimal, ROUND_DOWN
+from time import gmtime, strftime
+from datetime import datetime
+from textblob import TextBlob
+from io import StringIO
+from scipy import stats
+import pandas as pd
+import numpy as np
+
+############################################################
+############ REDDIT CREDENTIALS / AUTHORIZATION ############
+############################################################
+
+reddit_username             = "< REPLACE WITH YOUR REDDIT USERNAME >"
+reddit_password             = "< REPLACE WITH YOUR REDDIT PASSWORD >"
+authorization_code_part_a   = "< REPLACE WITH FIRST HALF OF YOUR REDDIT AUTH CODE >"
+authorization_code_part_b   = "< REPLACE WITH SECOND HALF OF YOUR REDDIT AUTH CODE >"
+client_auth                 = requests.auth.HTTPBasicAuth(authorization_code_part_a, authorization_code_part_b)
+post_data                   = {"grant_type": "password", "username": reddit_username, "password": reddit_password}
+headers                     = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/44.0.2403.89 Safari/537.36"}
+response                    = requests.post("https://www.reddit.com/api/v1/access_token", auth=client_auth, data=post_data, headers=headers)
+resp                        = response.json()
+csv_write                   = ""
+
+############################################################
+################## GLOBAL TIME VARIABLES ###################
+############################################################
+
+unix_timestamp = float()
+local_timezone = tzlocal.get_localzone()
+local_time = datetime.fromtimestamp(unix_timestamp, local_timezone)
+
+############################################################
+############################################################
+########## GATHER HEADLINES FROM A GIVEN SUBREDDIT #########
+############################################################
+
+def get_sub_reddit_new_posts(subreddit):
+    post_stats      = []
+    page_after      = ""
+    page_increment  = 0
+
+    while page_increment < 11:
+        if page_increment == 0:
+            get_sub = requests.get("http://www.reddit.com/r/" + subreddit + "/new/.json", headers=headers)
+        else:
+            get_sub = requests.get("http://www.reddit.com/r/" + subreddit + "/new/.json?after=" + page_after + "", headers=headers)
+
+        get_sub = get_sub.json()
+
+        for a in get_sub:
+            if a == "data":
+                for b in get_sub[a]:
+                    if str(b) == "after":
+                        page_after = get_sub[a]["after"]
+                    if b == "children":
+                        for c in get_sub[a][b]:
+                            for d in c:
+                                if d == "data":
+                                    for e in c[d]:
+                                        if e == "title":
+                                            keywords = ["inflation", "exchange rate", 'interest rate', "bitcoin", "nikkei", "cryptocurrency", "blockchain"]
+                                            for f in keywords:
+                                                if f in c[d][e].lower():
+                                                    g               = c[d]["created_utc"]
+                                                    unix_timestamp  = float(g)
+                                                    local_timezone  = tzlocal.get_localzone()
+                                                    local_time      = datetime.fromtimestamp(unix_timestamp, local_timezone)
+                                                    local_time      = str(local_time).split("-")
+
+                                                    year            = local_time[0]
+                                                    year            = int(year)
+
+                                                    month           = local_time[1]
+                                                    month           = int(month)
+
+                                                    day             = local_time[2]
+                                                    day             = str(day).split(" ")
+                                                    day             = day[0]
+                                                    day             = int(day)
+
+                                                    if month < 10 and day < 10:
+                                                        b = str(year)+"-0"+str(month)+"-0"+str(day)
+                                                    elif month < 10:
+                                                        b = str(year)+"-0"+str(month)+"-"+str(day)
+                                                    elif day < 10:
+                                                        b = str(year)+"-"+str(month)+"-0"+str(day)
+                                                    else:
+                                                        b = str(year)+"-"+str(month)+"-"+str(day)
+
+                                                    local_time = "-".join(local_time)
+                                                    if str(b) in str(local_time):
+                                                        text_assess(c[d][e], b)
+        page_increment+=1
+
+############################################################
+############### HEADLINES SENTIMENT ANALYSIS ###############
+############################################################
+
+def text_assess(headline, Date):
+    text_to_process = TextBlob(headline)
+    if text_to_process.sentiment.polarity > 0:
+        csv_write.writerow([Date, headline, "positive", text_to_process.sentiment.polarity])
+    elif text_to_process.sentiment.polarity < 0:
+        csv_write.writerow([Date, headline, "negative", text_to_process.sentiment.polarity])
+    else:
+        csv_write.writerow([Date, headline, "neutral", text_to_process.sentiment.polarity])
+
+############################################################
+### READ BTC/REDDIT FILES. THEN MATCH AND MERGE CSV FILES ##
+############################################################
+
+def combine_reddit_btc_files():
+    open_btc        = open("Coinbase_BTCUSD_d.csv", "r+")
+    read_btc        = csv.reader(open_btc)
+    get_btc_rows    = [a for a in read_btc]
+
+    open_reddit     = open("./polarity_data.csv", "r+")
+    read_reddit     = csv.reader(open_reddit)
+    get_reddit_rows = [b for b in read_reddit]
+
+    merged_csvfile  = open("./merged_csvfile.csv", "w+")
+    merged_writer   = csv.writer(merged_csvfile)
+
+    for c in get_reddit_rows:
+        for e in get_btc_rows:
+            if str(e[0]) == str(c[0]):
+                merged_writer.writerow([e[0], e[2], e[3], e[4], e[5], e[6], e[7], c[1], c[2], c[3]])
+            else:
+                merged_writer.writerow([e[0], e[2], e[3], e[4], e[5], e[6], e[7]])
+
+############################################################
+###### GET REDDIT RESULTS AND WRITE THEM TO CSV FILE #######
+############################################################
+
+def write_reddit_csv():
+    global csv_write 
+    open_reddit_csv = open("polarity_data.csv", "w")
+    csv_write       = csv.writer(open_reddit_csv)
+    
+    csv_write.writerow(["Date", "Headline", "Class", "Sentiment"])
+    get_sub_reddit_new_posts("economics")
+    open_reddit_csv.close()
+
+############################################################
+######################### INITIATE #########################
+############################################################
+
+write_reddit_csv()
+# combine_reddit_btc_files()
+
+############################################################
+####################### PLOTLY TEST ########################
+############################################################
+
+plotly_username = "< REPLACE WITH YOUR USERNAME >"
+plotly_api_key  = "< REPLACE WITH YOUR API KEY >"
+plotly.tools.set_credentials_file(username=plotly_username, api_key=plotly_api_key)
+
+############################################################
+############################################################
